@@ -120,8 +120,12 @@
   <p>Each move earns points from the <code>reward()</code> function. Change the numbers to
     change what the agent is trying to do. New numbers count from the next move; reset the agent
     to retrain it from scratch.</p>
+  <div class="row">
+    <label for="rule">Reward rule</label>
+    <select id="rule"></select>
+  </div>
   <table id="rewardTable"></table>
-  <div class="row"><button id="defaultRewards">Restore defaults</button></div>
+  <div class="row"><button id="defaultRewards">Reset numbers to this rule</button></div>
 
   <!-- 3. The agent -->
   <h2>3. A Q-learning agent</h2>
@@ -151,9 +155,18 @@
 
 <script>
 // ===================== Rewards =====================
-// Points for each part of a move. The controls on the page edit these numbers.
-const DEFAULT_REWARDS = { move: -1, turnout: 20, opponent: -10, repeat: -2 };
-const R = { ...DEFAULT_REWARDS };
+// Two reward rules to compare. The page starts with the first; the controls switch between them.
+const REWARD_RULES = {
+  turnout: {
+    label: 'Original: pay for turnout',
+    values: { move: -1, turnout: 20, opponent: -10, repeat: -2, door: 0 },
+  },
+  doors: {
+    label: 'Campaign metric: also pay per door knocked',
+    values: { move: -1, turnout: 20, opponent: -10, repeat: -2, door: 8 },
+  },
+};
+const R = { ...REWARD_RULES.turnout.values };  // the numbers in use right now
 
 // Points for one move. `e` describes what happened on that move (see step()).
 function reward(e) {
@@ -161,6 +174,7 @@ function reward(e) {
   if (e.turnedOut)       points += R.turnout;   // a supporter answers the door and goes to vote
   if (e.knockedOpponent) points += R.opponent;  // knocked on the non-supporter's door (may remind them to vote)
   if (e.knockedVoted)    points += R.repeat;    // knocked on a supporter who has already voted
+  if (e.house >= 0)      points += R.door;      // any door knocked counts as a contact (0 in the original rule)
   return points;
 }
 
@@ -170,6 +184,7 @@ const REWARD_LABELS = {
   turnout:  ['Supporter turns out', 'First knock on a supporter’s door'],
   opponent: ['Knock on non-supporter', 'Every knock on the non-supporter’s door'],
   repeat:   ['Knock again', 'Knocking on a supporter who already voted'],
+  door:     ['Each door knocked', 'Any knock on any door, counted as a contact'],
 };
 
 // ===================== The game =====================
@@ -404,7 +419,16 @@ function setButtons() {
 
 // ===================== Page: reward controls =====================
 const rewardTable = document.getElementById('rewardTable');
-for (const key of Object.keys(DEFAULT_REWARDS)) {
+const ruleSelect = document.getElementById('rule');
+for (const [id, rule] of Object.entries(REWARD_RULES)) ruleSelect.add(new Option(rule.label, id));
+
+// Put the selected rule's numbers into use and into the inputs.
+function applyRule() {
+  Object.assign(R, REWARD_RULES[ruleSelect.value].values);
+  for (const key in R) document.getElementById('r-' + key).value = R[key];
+}
+
+for (const key of Object.keys(R)) {
   const [label, note] = REWARD_LABELS[key];
   const tr = document.createElement('tr');
   tr.innerHTML = `<td><b>${label}</b><br><span class="muted">${note}</span></td>
@@ -417,10 +441,8 @@ for (const key of Object.keys(DEFAULT_REWARDS)) {
     if (!Number.isNaN(v)) R[key] = v;
   });
 }
-document.getElementById('defaultRewards').addEventListener('click', () => {
-  Object.assign(R, DEFAULT_REWARDS);
-  for (const key in R) document.getElementById('r-' + key).value = R[key];
-});
+ruleSelect.addEventListener('change', applyRule);
+document.getElementById('defaultRewards').addEventListener('click', applyRule);
 
 // ===================== Page: agent controls =====================
 function updateAgentStatus() {
