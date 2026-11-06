@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get Out the Vote</title>
+<style>
+  :root {
+    --bg: #fdfdfb;
+    --panel: #ffffff;
+    --ink: #222222;
+    --ink-muted: #666666;
+    --rule: #dddddd;
+    --grid-line: #ececea;
+    --cell: #f4f4f1;
+    --supporter: #2a78d6;
+    --opponent: #8a8a85;
+    --voted: #1f8a4c;
+    --canvasser: #eb6834;
+    --series-reward: #2a78d6;
+    --series-goal: #eb6834;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 1.5rem 16px 3rem; }
+  h1 { font-size: 2rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.3rem; border-bottom: 2px solid #ccc; padding-bottom: .3rem; margin: 2.2rem 0 .8rem; }
+  p { margin: .4rem 0; }
+  .muted { color: var(--ink-muted); font-size: .92rem; }
+  button {
+    font: inherit; font-size: .95rem; padding: .4rem .8rem; cursor: pointer;
+    border: 1px solid #bbb; border-radius: 6px; background: var(--panel); color: var(--ink);
+  }
+  button:hover:not(:disabled) { background: #f0f0ec; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .6rem 0; }
+
+  /* Game board */
+  .game { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+  .grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
+    width: min(340px, 100%); padding: 4px; background: var(--grid-line); border-radius: 8px;
+  }
+  .cell {
+    aspect-ratio: 1; background: var(--cell); border-radius: 5px; position: relative;
+    display: flex; align-items: flex-start; justify-content: center; text-align: center;
+    padding-top: 8%; font-size: .72rem; line-height: 1.1; color: var(--ink-muted);
+  }
+  .cell.house { border: 3px solid var(--opponent); background: #fff; color: var(--ink); }
+  .cell.house.supporter { border-color: var(--supporter); }
+  .cell.house.voted { border-color: var(--voted); background: #e8f5ec; }
+  .cell .who {
+    position: absolute; width: 36%; height: 36%; border-radius: 50%;
+    background: var(--canvasser); box-shadow: 0 0 0 2px #fff; bottom: 6%; right: 6%;
+  }
+  .side { flex: 1; min-width: 220px; }
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: .15rem 1rem; margin-bottom: .6rem; }
+  .stats b { font-variant-numeric: tabular-nums; }
+  .pad { display: grid; grid-template-columns: repeat(3, 3rem); gap: 4px; margin: .6rem 0; }
+  .pad button { padding: .4rem 0; }
+  #message { min-height: 3em; }
+
+  /* Reward table */
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: .35rem .5rem .35rem 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  td:last-child { text-align: right; padding-right: 0; }
+  input[type=number] { font: inherit; width: 5.5rem; padding: .2rem .4rem; text-align: right; }
+
+  /* Learning curve */
+  .chart-wrap { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 8px; }
+  #chart { width: 100%; height: auto; display: block; font-family: system-ui, sans-serif; }
+  #tooltip {
+    position: absolute; pointer-events: none; display: none; background: #fff; border: 1px solid #ccc;
+    border-radius: 6px; padding: .35rem .55rem; font: .8rem/1.35 system-ui, sans-serif;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap;
+  }
+  .swatch { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Get out the vote</h1>
+  <p>You are a canvasser on election day. You have <b>25 moves</b> before the polls close.
+    Two of the three houses are your supporters: knock on their doors and they go vote.
+    The third house is not a supporter. Can you turn out both supporters, and then can a
+    computer learn to do it by trial and error?</p>
+
+  <!-- 1. The game -->
+  <h2>1. Play the game</h2>
+  <div class="game">
+    <div id="grid" class="grid" aria-label="Neighborhood map"></div>
+    <div class="side">
+      <div class="stats">
+        <span>Playing</span><b id="who">You</b>
+        <span>Moves left</span><b id="moves">25</b>
+        <span>Supporters voted</span><b id="turnout">0 of 2</b>
+        <span>Score</span><b id="score">0</b>
+      </div>
+      <div class="pad">
+        <span></span><button data-move="0" aria-label="Up">↑</button><span></span>
+        <button data-move="2" aria-label="Left">←</button><span></span><button data-move="3" aria-label="Right">→</button>
+        <span></span><button data-move="1" aria-label="Down">↓</button><span></span>
+      </div>
+      <div class="row"><button id="newGame">New game</button></div>
+      <p id="message" class="muted">Use the arrow keys or buttons. Walk onto a house to knock on its door.</p>
+    </div>
+  </div>
+  <p class="muted">The state is the canvasser's square (25 options) plus which supporters have
+    already voted (4 options), so the game has <b>25 × 4 = 100 states</b>. The clock is not part
+    of the state: the agent never sees how many moves are left.</p>
+
+  <!-- 2. Rewards -->
+  <h2>2. Rewards</h2>
+  <p>Each move earns points from the <code>reward()</code> function. Change the numbers to
+    change what the agent is trying to do. New numbers count from the next move; reset the agent
+    to retrain it from scratch.</p>
+  <table id="rewardTable"></table>
+  <div class="row"><button id="defaultRewards">Restore defaults</button></div>
+
+  <!-- 3. The agent -->
+  <h2>3. A Q-learning agent</h2>
+  <p>The agent keeps a table with one number for each of the 100 states × 4 moves: its guess of
+    how many points that move leads to. All guesses start at 0. After every move it nudges the
+    guess toward <i>points just earned + 0.95 × best guess from the new square</i>.</p>
+  <p class="muted">Exploration ε = 0.2 (1 move in 5 is random) · learning rate 0.2 ·
+    discount 0.95 · ties broken at random.</p>
+  <div class="row">
+    <button id="train100">Train 100 games</button>
+    <button id="train1000">Train 1,000 games</button>
+    <button id="resetAgent">Reset agent</button>
+    <button id="watch">Watch it play</button>
+    <label class="muted">Seed <input id="seed" type="number" value="1" step="1"></label>
+  </div>
+  <p id="agentStatus" class="muted"></p>
+
+  <!-- 4. Learning curve -->
+  <h2>4. Learning curve</h2>
+  <p class="muted">Each point summarizes 50 training games (with exploration on).
+    Both panels share the same horizontal axis.</p>
+  <div class="chart-wrap">
+    <svg id="chart" viewBox="0 0 640 360" role="img" aria-label="Learning curve"></svg>
+    <div id="tooltip"></div>
+  </div>
+</main>
+
+<script>
+// ===================== Rewards =====================
+// Points for each part of a move. The controls on the page edit these numbers.
+const DEFAULT_REWARDS = { move: -1, turnout: 20, opponent: -10, repeat: -2 };
+const R = { ...DEFAULT_REWARDS };
+
+// Points for one move. `e` describes what happened on that move (see step()).
+function reward(e) {
+  let points = R.move;                          // every move uses up time before the polls close
+  if (e.turnedOut)       points += R.turnout;   // a supporter answers the door and goes to vote
+  if (e.knockedOpponent) points += R.opponent;  // knocked on the non-supporter's door (may remind them to vote)
+  if (e.knockedVoted)    points += R.repeat;    // knocked on a supporter who has already voted
+  return points;
+}
+
+// Labels for the reward controls.
+const REWARD_LABELS = {
+  move:     ['Each move', 'Time spent walking'],
+  turnout:  ['Supporter turns out', 'First knock on a supporter’s door'],
+  opponent: ['Knock on non-supporter', 'Every knock on the non-supporter’s door'],
+  repeat:   ['Knock again', 'Knocking on a supporter who already voted'],
+};
+
+// ===================== The game =====================
+const SIZE = 5;
+const MAX_MOVES = 25;
+const START = { x: 0, y: 2 };
+const HOUSES = [
+  { x: 4, y: 0, supporter: true,  name: 'A' },
+  { x: 4, y: 4, supporter: true,  name: 'B' },
+  { x: 4, y: 2, supporter: false, name: 'C' },
+];
+const SUPPORTERS = HOUSES.map((h, i) => i).filter(i => HOUSES[i].supporter);
+const ACTIONS = [
+  { name: 'up', dx: 0, dy: -1 }, { name: 'down', dx: 0, dy: 1 },
+  { name: 'left', dx: -1, dy: 0 }, { name: 'right', dx: 1, dy: 0 },
+];
+const NUM_STATES = SIZE * SIZE * (1 << SUPPORTERS.length);  // 25 squares × 4 = 100
+
+function newGame() {
+  return { x: START.x, y: START.y, voted: HOUSES.map(() => false), movesLeft: MAX_MOVES };
+}
+
+function houseAt(x, y) {
+  return HOUSES.findIndex(h => h.x === x && h.y === y);
+}
+
+// The state number (0–99): which square, and which supporters have voted.
+function stateIndex(s) {
+  let mask = 0;
+  SUPPORTERS.forEach((h, bit) => { if (s.voted[h]) mask |= 1 << bit; });
+  return (s.y * SIZE + s.x) * (1 << SUPPORTERS.length) + mask;
+}
+
+function allVoted(s) {
+  return SUPPORTERS.every(h => s.voted[h]);
+}
+
+// Make one move. Walking onto a house knocks on its door; walking into the edge wastes the move.
+function step(s, a) {
+  const x = Math.min(SIZE - 1, Math.max(0, s.x + ACTIONS[a].dx));
+  const y = Math.min(SIZE - 1, Math.max(0, s.y + ACTIONS[a].dy));
+  const moved = x !== s.x || y !== s.y;
+  const voted = s.voted.slice();
+  const e = { house: -1, turnedOut: false, knockedOpponent: false, knockedVoted: false };
+
+  const h = moved ? houseAt(x, y) : -1;
+  if (h >= 0) {
+    e.house = h;
+    if (!HOUSES[h].supporter) e.knockedOpponent = true;
+    else if (voted[h]) e.knockedVoted = true;
+    else { voted[h] = true; e.turnedOut = true; }
+  }
+
+  const next = { x, y, voted, movesLeft: s.movesLeft - 1 };
+  const goal = allVoted(next);
+  const done = goal || next.movesLeft === 0;  // game ends when both have voted or the polls close
+  return { next, e, r: reward(e), done, goal };
+}
+
+// ===================== Random numbers =====================
+// Small seeded generator (mulberry32): the same seed gives the same results every time.
+function makeRng(seed) {
+  let t = seed >>> 0;
+  return function () {
+    t = (t + 0x6D2B79F5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ===================== Q-learning agent =====================
+const EPSILON = 0.2;   // chance of a random move while training
+const ALPHA = 0.2;     // learning rate
+const GAMMA = 0.95;    // discount on future points
+const BLOCK = 50;      // games per point on the learning curve
+
+let Q, rng, history;   // Q-table, training randomness, one {total, goal} per training game
+
+function resetAgent() {
+  Q = Array.from({ length: NUM_STATES }, () => [0, 0, 0, 0]);
+  rng = makeRng(Number(document.getElementById('seed').value) || 0);
+  history = [];
+}
+
+// Best move by the table; ties broken at random.
+function bestAction(s, rand) {
+  const q = Q[stateIndex(s)];
+  const top = Math.max(...q);
+  const ties = [0, 1, 2, 3].filter(a => q[a] === top);
+  return ties[Math.floor(rand() * ties.length)];
+}
+
+// Epsilon-greedy: usually the best move, sometimes a random one.
+function exploreAction(s) {
+  return rng() < EPSILON ? Math.floor(rng() * ACTIONS.length) : bestAction(s, rng);
+}
+
+function trainOneGame() {
+  let s = newGame(), total = 0;
+  while (true) {
+    const a = exploreAction(s);
+    const { next, r, done, goal } = step(s, a);
+    const i = stateIndex(s);
+    const future = done ? 0 : Math.max(...Q[stateIndex(next)]);  // no future after the game ends
+    Q[i][a] += ALPHA * (r + GAMMA * future - Q[i][a]);
+    total += r;
+    s = next;
+    if (done) { history.push({ total, goal }); return; }
+  }
+}
+
+function train(n) {
+  for (let k = 0; k < n; k++) trainOneGame();
+  updateAgentStatus();
+  drawChart();
+}
+
+// ===================== Page: the board =====================
+const gridEl = document.getElementById('grid');
+const cells = [];
+for (let y = 0; y < SIZE; y++) {
+  for (let x = 0; x < SIZE; x++) {
+    const c = document.createElement('div');
+    c.className = 'cell';
+    gridEl.appendChild(c);
+    cells.push(c);
+  }
+}
+
+let game = newGame();   // what the board is showing
+let score = 0;
+let over = false;
+let watching = false;
+
+function render() {
+  cells.forEach((c, k) => {
+    const x = k % SIZE, y = Math.floor(k / SIZE), h = houseAt(x, y);
+    c.className = 'cell';
+    c.textContent = '';
+    if (h >= 0) {
+      const house = HOUSES[h];
+      c.classList.add('house');
+      if (house.supporter) c.classList.add('supporter');
+      if (game.voted[h]) c.classList.add('voted');
+      c.textContent = `${house.name}\n` + (game.voted[h] ? 'Voted ✓' : house.supporter ? 'Supporter' : 'Not a supporter');
+      c.style.whiteSpace = 'pre-line';
+    } else if (x === START.x && y === START.y) {
+      c.textContent = 'Office';
+    }
+    if (x === game.x && y === game.y) {
+      const dot = document.createElement('span');
+      dot.className = 'who';
+      c.appendChild(dot);
+    }
+  });
+  document.getElementById('who').textContent = watching ? 'Agent' : 'You';
+  document.getElementById('moves').textContent = game.movesLeft;
+  document.getElementById('turnout').textContent = `${SUPPORTERS.filter(h => game.voted[h]).length} of ${SUPPORTERS.length}`;
+  document.getElementById('score').textContent = fmt(score);
+}
+
+function fmt(v) {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+function describe(e, r) {
+  const pts = ` (${r >= 0 ? '+' : ''}${fmt(r)})`;
+  if (e.turnedOut) return `House ${HOUSES[e.house].name} is a supporter and goes to vote!` + pts;
+  if (e.knockedOpponent) return `House ${HOUSES[e.house].name} is not a supporter.` + pts;
+  if (e.knockedVoted) return `House ${HOUSES[e.house].name} already voted.` + pts;
+  return 'Walking…' + pts;
+}
+
+function endMessage(goal) {
+  const n = SUPPORTERS.filter(h => game.voted[h]).length;
+  return (goal ? 'Both supporters voted! ' : 'The polls have closed. ') +
+    `${n} of ${SUPPORTERS.length} supporters turned out. Final score: ${fmt(score)}.`;
+}
+
+function startHumanGame() {
+  game = newGame(); score = 0; over = false;
+  document.getElementById('message').textContent = 'Use the arrow keys or buttons. Walk onto a house to knock on its door.';
+  render();
+}
+
+function humanMove(a) {
+  if (over || watching) return;
+  const { next, e, r, done, goal } = step(game, a);
+  game = next; score += r;
+  document.getElementById('message').textContent = done ? endMessage(goal) : describe(e, r);
+  over = done;
+  render();
+}
+
+document.querySelectorAll('[data-move]').forEach(b =>
+  b.addEventListener('click', () => humanMove(Number(b.dataset.move))));
+document.addEventListener('keydown', ev => {
+  if (ev.target.tagName === 'INPUT') return;
+  const a = { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3 }[ev.key];
+  if (a === undefined) return;
+  ev.preventDefault();
+  humanMove(a);
+});
+document.getElementById('newGame').addEventListener('click', startHumanGame);
+
+// ===================== Page: watch the agent =====================
+// Plays one game with no exploring. Uses its own random numbers so watching never changes training.
+function watch() {
+  const watchRng = makeRng((Number(document.getElementById('seed').value) || 0) + 1);
+  watching = true; game = newGame(); score = 0; over = false;
+  setButtons();
+  render();
+  document.getElementById('message').textContent = 'The agent is playing (best move every time)…';
+
+  const tick = () => {
+    const { next, e, r, done, goal } = step(game, bestAction(game, watchRng));
+    game = next; score += r;
+    document.getElementById('message').textContent = done ? 'Agent: ' + endMessage(goal) : 'Agent: ' + describe(e, r);
+    render();
+    if (done) { watching = false; over = true; setButtons(); return; }
+    setTimeout(tick, 280);
+  };
+  setTimeout(tick, 400);
+}
+
+function setButtons() {
+  document.querySelectorAll('button').forEach(b => {
+    if (b.id !== 'defaultRewards') b.disabled = watching;
+  });
+}
+
+// ===================== Page: reward controls =====================
+const rewardTable = document.getElementById('rewardTable');
+for (const key of Object.keys(DEFAULT_REWARDS)) {
+  const [label, note] = REWARD_LABELS[key];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><b>${label}</b><br><span class="muted">${note}</span></td>
+    <td><input type="number" step="1" id="r-${key}" aria-label="${label}"></td>`;
+  rewardTable.appendChild(tr);
+  const input = tr.querySelector('input');
+  input.value = R[key];
+  input.addEventListener('input', () => {
+    const v = parseFloat(input.value);
+    if (!Number.isNaN(v)) R[key] = v;
+  });
+}
+document.getElementById('defaultRewards').addEventListener('click', () => {
+  Object.assign(R, DEFAULT_REWARDS);
+  for (const key in R) document.getElementById('r-' + key).value = R[key];
+});
+
+// ===================== Page: agent controls =====================
+function updateAgentStatus() {
+  const el = document.getElementById('agentStatus');
+  if (!history.length) { el.textContent = 'Games trained: 0. The agent knows nothing yet.'; return; }
+  const last = history.slice(-BLOCK);
+  const avg = last.reduce((t, g) => t + g.total, 0) / last.length;
+  const share = last.filter(g => g.goal).length / last.length;
+  el.textContent = `Games trained: ${history.length.toLocaleString()}. Last ${last.length} games: ` +
+    `average reward ${avg.toFixed(1)}, both supporters turned out in ${Math.round(share * 100)}%.`;
+}
+
+document.getElementById('train100').addEventListener('click', () => train(100));
+document.getElementById('train1000').addEventListener('click', () => train(1000));
+document.getElementById('resetAgent').addEventListener('click', () => { resetAgent(); updateAgentStatus(); drawChart(); });
+document.getElementById('watch').addEventListener('click', watch);
+
+// ===================== Page: learning curve =====================
+const W = 640, H = 360, LEFT = 52, RIGHT = 16;
+const P1 = { top: 30, h: 130 };    // average reward panel
+const P2 = { top: 212, h: 100 };   // goal share panel
+
+// Round axis steps to 1, 2 or 5 × a power of ten.
+function niceStep(range, count) {
+  const raw = range / count, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / mag;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+}
+
+function blocks() {
+  const out = [];
+  for (let i = 0; i + BLOCK <= history.length; i += BLOCK) {
+    const g = history.slice(i, i + BLOCK);
+    out.push({
+      start: i + 1, end: i + BLOCK,
+      avg: g.reduce((t, x) => t + x.total, 0) / BLOCK,
+      goal: g.filter(x => x.goal).length / BLOCK,
+    });
+  }
+  return out;
+}
+
+function drawChart() {
+  const svg = document.getElementById('chart');
+  const data = blocks();
+  const xMax = Math.max(100, data.length ? data[data.length - 1].end : 0);
+  const sx = v => LEFT + (v / xMax) * (W - LEFT - RIGHT);
+
+  // Reward panel scale, always including 0.
+  const vals = data.map(d => d.avg);
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  if (hi - lo < 1) { lo -= 5; hi += 5; }
+  const rs = niceStep(hi - lo, 4);
+  lo = Math.floor(lo / rs) * rs; hi = Math.ceil(hi / rs) * rs;
+  const sy1 = v => P1.top + P1.h - ((v - lo) / (hi - lo)) * P1.h;
+  const sy2 = v => P2.top + P2.h - v * P2.h;
+
+  let out = '';
+  const text = (x, y, s, anchor = 'end', extra = '') =>
+    `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="11" fill="#666" ${extra}>${s}</text>`;
+
+  // Panel titles
+  out += `<text x="${LEFT}" y="${P1.top - 12}" font-size="13" font-weight="600" fill="#222">Average reward per game</text>`;
+  out += `<text x="${LEFT}" y="${P2.top - 12}" font-size="13" font-weight="600" fill="#222">Share of games that turn out both supporters</text>`;
+
+  // Grid lines and y labels
+  for (let v = lo; v <= hi + 1e-9; v += rs) {
+    const y = sy1(v);
+    out += `<line x1="${LEFT}" x2="${W - RIGHT}" y1="${y}" y2="${y}" stroke="${v === 0 ? '#bbb' : '#ececea'}"/>`;
+    out += text(LEFT - 6, y + 4, fmt(+v.toFixed(6)));
+  }
+  for (const v of [0, 0.5, 1]) {
+    const y = sy2(v);
+    out += `<line x1="${LEFT}" x2="${W - RIGHT}" y1="${y}" y2="${y}" stroke="${v === 0 ? '#bbb' : '#ececea'}"/>`;
+    out += text(LEFT - 6, y + 4, `${v * 100}%`);
+  }
+
+  // Shared x axis
+  const xs = niceStep(xMax, 5);
+  for (let v = 0; v <= xMax + 1e-9; v += xs) {
+    out += text(sx(v), P2.top + P2.h + 16, v.toLocaleString(), 'middle');
+  }
+  out += text((LEFT + W - RIGHT) / 2, H - 6, 'Training games played', 'middle');
+
+  if (!data.length) {
+    out += text((LEFT + W - RIGHT) / 2, P1.top + P1.h / 2, 'Train the agent to see its learning curve.', 'middle', 'font-size="13"');
+  } else {
+    // Lines (with dots while there are few points)
+    const line = (sy, key, color) => {
+      const pts = data.map(d => `${sx(d.end).toFixed(1)},${sy(d[key]).toFixed(1)}`).join(' ');
+      let s = `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      if (data.length <= 24) data.forEach(d => {
+        s += `<circle cx="${sx(d.end)}" cy="${sy(d[key])}" r="3.5" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+      });
+      return s;
+    };
+    out += line(sy1, 'avg', 'var(--series-reward)');
+    out += line(sy2, 'goal', 'var(--series-goal)');
+  }
+
+  // Hover layer: crosshair across both panels
+  out += `<g id="hover" style="display:none">
+    <line id="hLine" y1="${P1.top}" y2="${P2.top + P2.h}" stroke="#999" stroke-dasharray="3 3"/>
+    <circle id="hDot1" r="5" fill="var(--series-reward)" stroke="#fff" stroke-width="2"/>
+    <circle id="hDot2" r="5" fill="var(--series-goal)" stroke="#fff" stroke-width="2"/>
+  </g>
+  <rect id="hit" x="${LEFT}" y="${P1.top}" width="${W - LEFT - RIGHT}" height="${P2.top + P2.h - P1.top}" fill="transparent"/>`;
+  svg.innerHTML = out;
+
+  const hover = svg.querySelector('#hover'), tip = document.getElementById('tooltip');
+  const hit = svg.querySelector('#hit');
+  hit.addEventListener('mousemove', ev => {
+    if (!data.length) return;
+    const box = svg.getBoundingClientRect();
+    const vx = (ev.clientX - box.left) * W / box.width;
+    let best = data[0];
+    for (const d of data) if (Math.abs(sx(d.end) - vx) < Math.abs(sx(best.end) - vx)) best = d;
+    const x = sx(best.end);
+    hover.style.display = '';
+    svg.querySelector('#hLine').setAttribute('x1', x);
+    svg.querySelector('#hLine').setAttribute('x2', x);
+    svg.querySelector('#hDot1').setAttribute('cx', x);
+    svg.querySelector('#hDot1').setAttribute('cy', sy1(best.avg));
+    svg.querySelector('#hDot2').setAttribute('cx', x);
+    svg.querySelector('#hDot2').setAttribute('cy', sy2(best.goal));
+    tip.innerHTML = `<b>Games ${best.start.toLocaleString()}–${best.end.toLocaleString()}</b><br>
+      <span class="swatch" style="background:var(--series-reward)"></span>Average reward: ${best.avg.toFixed(1)}<br>
+      <span class="swatch" style="background:var(--series-goal)"></span>Both supporters voted: ${Math.round(best.goal * 100)}%`;
+    tip.style.display = 'block';
+    const px = x * box.width / W + 8;
+    tip.style.left = Math.min(px + 12, box.width - tip.offsetWidth) + 'px';
+    tip.style.top = (sy1(best.avg) * box.height / H) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { hover.style.display = 'none'; tip.style.display = 'none'; });
+}
+
+// ===================== Start =====================
+resetAgent();
+updateAgentStatus();
+drawChart();
+startHumanGame();
+</script>
+</body>
+</html>
